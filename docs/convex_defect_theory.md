@@ -222,7 +222,19 @@ so detuned / high-frequency channels source defects more strongly under residual
 4. **Holonomy** \(H\) — path-ordered topological memory along a trajectoid geodesic or lattice trajectory.
 5. **Relaxation** — when control / survival dynamics drive \(x \to 0\) and \(\kappa \to \kappa^*\), \(\rho\) decays at rate \(\lambda(\kappa)\).
 
-For `flux_trajectoid` turbulence sweeps, a structured phase screen can be built by sampling \(\rho\) (or \(\tau\)) over a spatial grid and frequency band instead of pure Kolmogorov noise — preserving the same fidelity metrics (`overlap_fidelity`, `oam_fidelity`, etc.).
+For `flux_trajectoid` turbulence sweeps, structured phase screens are wired in via
+`flux_trajectoid.propagation.phase_screens` and `propagate(..., screen_model=...)`:
+
+| `screen_model` | Behavior |
+|----------------|----------|
+| `kolmogorov` | Default Fourier Kolmogorov-like texture |
+| `convex_defect` | Evolving local \(x_{ij}\) grid → `grid_to_phase_screen` → RMS-scaled phase |
+| `hybrid` | Weighted mix of Kolmogorov + convex_defect |
+
+```python
+ast.propagate(turbulence_level=0.3, screen_model="convex_defect", convex_f=1.5, convex_s=0.5)
+# compare: examples/compare_phase_screens.py in flux_trajectoid
+```
 
 ## Analytic limits (useful checks)
 
