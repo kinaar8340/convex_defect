@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "convex-defect"
-version = "0.1.0"
+version = "0.2.0"
 description = "Frequency-dependent topological convex defect density with κ-tuned fractal relaxation (mystery / flux_trajectoid extension)"
 readme = "README.md"
 requires-python = ">=3.10"

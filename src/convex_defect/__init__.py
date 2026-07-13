@@ -1,7 +1,8 @@
 """convex_defect — frequency-dependent topological convex defect density.
 
 Extends mystery / flux_trajectoid ideas: misalignment-driven Gaussian + fractal
-defects, holonomy accumulation, and survival-eigenstructure relaxation.
+defects, holonomy accumulation, survival-eigenstructure relaxation, and
+multi-scale dynamical ρ(s) fields.
 """
 
 from __future__ import annotations
@@ -24,6 +25,12 @@ from .holonomy_accumulator import (
     accumulate_holonomy,
     gamma_H,
     holonomy_integrand,
+)
+from .multi_scale_field import (
+    MultiScaleDefectField,
+    MultiScaleParams,
+    ScaleBins,
+    multi_scale_phase_screen,
 )
 from .relaxation_dynamics import (
     RelaxationDynamics,
@@ -50,7 +57,7 @@ from .simulator import (
     sweep_kappa,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     # density
@@ -64,6 +71,11 @@ __all__ = [
     "opacity",
     "gaussian_area_opacity",
     "holonomy_gap",
+    # multi-scale
+    "ScaleBins",
+    "MultiScaleParams",
+    "MultiScaleDefectField",
+    "multi_scale_phase_screen",
     # holonomy
     "HolonomyParams",
     "HolonomyAccumulator",

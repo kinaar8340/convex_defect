@@ -244,14 +244,35 @@ ast.propagate(turbulence_level=0.3, screen_model="convex_defect", convex_f=1.5, 
 4. **Opacity vs \(f\)**: for fixed \(x, \kappa\), \(\tau \propto A(f)\, e^{-x^2/\sigma(f)^2}\, I_\delta\); high \(f\) narrows \(\sigma\) (core tightens) while \(A\) may grow — “quicksand” is the competition of these trends.
 5. **Healing at \(x = 0\)**: continuous \(\dot\rho = -\lambda\rho\) → pure exponential; discrete form multiplies by \(e^{-\lambda\Delta t}\, s^{-\delta}\).
 
+## Multi-scale dynamical field \(\rho(s)\)
+
+Beyond single-scale evaluation, the package evolves a **distribution over scale bins**:
+
+\[
+\rho_k(t) \;\approx\; \rho(x(t), f, \kappa, s_k; t)
+\quad k = 1,\ldots,N_s
+\]
+
+- **Seed**: each bin from the static formula \(A\,e^{-x^2/\sigma^2}\,s_k^{-\delta}\).
+- **Evolve**: discrete survival **without** re-multiplying \(s^{-\delta}\) each step
+  (fractal weight is already in the bin state). Optional neighbor **scale coupling**
+  mixes adjacent bins.
+- **Opacity**: \(\tau \approx \sum_k \rho_k\, w_k\) with log- or linear-bin weights.
+- **Phase screen** (spatial): \(\mathrm{screen}_{ij} = \sum_k \rho_{ij,k}\, w_k\).
+- **Holonomy** (multi-scale mode): uses the **evolved** spectrum (not instantaneous formula).
+
+API: `MultiScaleDefectField`, `ScaleBins`, `run_simulation(..., multi_scale=True)`.
+In `flux_trajectoid`: `propagate(..., screen_model="convex_defect", multi_scale=True)`.
+
 ## Implementation map
 
 | Module | Responsibility |
 |--------|----------------|
 | `defect_density.py` | `DefectParams`, \(\sigma, A, \delta, \rho, \tau, \tau_x\) |
+| `multi_scale_field.py` | `ScaleBins`, dynamical \(\rho(s)\) / \(\rho(x_{ij}, s)\), integrated screens |
 | `holonomy_accumulator.py` | Discrete / integrated \(H(t)\) with \(\gamma_H(f)\) |
 | `relaxation_dynamics.py` | \(\lambda(\kappa)\), ODE and discrete survival steps |
-| `simulator.py` | Coupled pointer \(x(t)\) + \(\rho\) + \(H\) + \(\tau\); optional 1D/2D local-misalignment grid; `grid_to_phase_screen` for flux_trajectoid hooks |
+| `simulator.py` | Coupled pointer \(x(t)\) + \(\rho\) + \(H\) + \(\tau\); optional 1D/2D grid; multi-scale mode; `grid_to_phase_screen` |
 
 ## Next steps
 

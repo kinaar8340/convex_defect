@@ -24,6 +24,10 @@ tau = model.opacity(x=0.1, f=1.0, kappa=0.85)
 
 result = run_simulation(n_steps=100, f=1.0, x0=0.4, seed=0)
 print(result.H[-1], result.rho[-1])
+
+# multi-scale dynamical ρ(s)
+ms = run_simulation(n_steps=80, multi_scale=True, n_scales=16, grid_shape=(32, 32), x0=0.5)
+print(ms.rho_spectrum_final.shape, ms.screen_final.shape)
 ```
 
 ```bash
@@ -46,6 +50,7 @@ pytest
 |------|------|
 | `docs/convex_defect_theory.md` | Equations + mapping to oam_flux / mystery / trajectoids |
 | `src/convex_defect/defect_density.py` | \(\rho(x,f,\kappa,s)\), \(\sigma\), \(A\), \(\tau\) |
+| `src/convex_defect/multi_scale_field.py` | Dynamical multi-scale \(\rho(s)\) / spatial \(\rho(x_{ij},s)\) |
 | `src/convex_defect/holonomy_accumulator.py` | Fractal holonomy \(H(t)\) (pure accumulation, double fractal) |
 | `src/convex_defect/relaxation_dynamics.py` | Survival-eigenstructure relaxation + clamp |
 | `src/convex_defect/simulator.py` | Coupled pointer + \(\rho\) + \(H\); optional 1D/2D grid |

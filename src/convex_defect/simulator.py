@@ -31,6 +31,11 @@ from numpy.typing import ArrayLike, NDArray
 
 from .defect_density import DefectParams, defect_density, opacity
 from .holonomy_accumulator import HolonomyParams, holonomy_integrand
+from .multi_scale_field import (
+    MultiScaleDefectField,
+    MultiScaleParams,
+    multi_scale_phase_screen,
+)
 from .relaxation_dynamics import (
     RelaxationParams,
     continuous_rhs,
@@ -160,6 +165,11 @@ class SimConfig:
     grid_correlation: float = 0.85  # AR(1) blend toward global x each step
     grid_noise: float = 0.05  # local noise std on the grid
     track_grid_stats: bool = True
+    # multi-scale ρ(s) field
+    multi_scale: bool = False
+    n_scales: int = 16
+    scale_coupling: float = 0.0
+    track_spectrum: bool = True  # store ρ(s) history when multi_scale
 
     def __post_init__(self) -> None:
         if self.n_steps < 1:
@@ -179,6 +189,10 @@ class SimConfig:
                 raise ValueError("grid_shape entries must be positive")
         if not (0.0 <= self.grid_correlation <= 1.0):
             raise ValueError("grid_correlation must lie in [0, 1]")
+        if self.n_scales < 2:
+            raise ValueError("n_scales must be >= 2")
+        if not (0.0 <= self.scale_coupling < 1.0):
+            raise ValueError("scale_coupling must lie in [0, 1)")
 
     def with_updates(self, **kwargs: Any) -> SimConfig:
         return replace(self, **kwargs)
@@ -202,6 +216,11 @@ class SimResult:
     grid_mean: NDArray[np.floating] | None = None
     grid_std: NDArray[np.floating] | None = None
     grid_final: NDArray[np.floating] | None = None
+    # multi-scale diagnostics
+    s_bins: NDArray[np.floating] | None = None
+    rho_spectrum: NDArray[np.floating] | None = None  # (n_times, n_scales) mean spectrum
+    rho_spectrum_final: NDArray[np.floating] | None = None  # last spectrum
+    screen_final: NDArray[np.floating] | None = None  # integrated multi-scale screen
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
@@ -221,6 +240,14 @@ class SimResult:
             out["grid_std"] = self.grid_std
         if self.grid_final is not None:
             out["grid_final"] = self.grid_final
+        if self.s_bins is not None:
+            out["s_bins"] = self.s_bins
+        if self.rho_spectrum is not None:
+            out["rho_spectrum"] = self.rho_spectrum
+        if self.rho_spectrum_final is not None:
+            out["rho_spectrum_final"] = self.rho_spectrum_final
+        if self.screen_final is not None:
+            out["screen_final"] = self.screen_final
         out["metadata"] = self.metadata
         return out
 
@@ -269,13 +296,29 @@ def grid_to_phase_screen(
     *,
     defect_params: DefectParams | None = None,
     gain: float = 1.0,
+    multi_scale: bool = False,
+    n_scales: int = 16,
+    multi_params: MultiScaleParams | None = None,
 ) -> NDArray[np.floating]:
     """Map local misalignment grid → defect-density phase/amplitude screen.
 
     Suitable as a structured alternative to Kolmogorov screens in
-    ``flux_trajectoid.propagation``. Returns ρ(x_ij, f, κ, s) · gain.
+    ``flux_trajectoid.propagation``.
+
+    - Single-scale (default): ρ(x_ij, f, κ, s) · gain
+    - Multi-scale: Σ_k ρ(x_ij, f, κ, s_k) · w_k · gain
     """
     g = np.asarray(grid, dtype=float)
+    if multi_scale:
+        mp = multi_params or MultiScaleParams(n_scales=n_scales)
+        return multi_scale_phase_screen(
+            g,
+            f,
+            kappa,
+            defect_params=defect_params,
+            multi_params=mp,
+            gain=gain,
+        )
     return gain * defect_density(g, f, kappa, s, params=defect_params)
 
 
@@ -323,20 +366,8 @@ class ConvexDefectSimulator:
         # --- initial state ---
         ptr = PointerDynamics(params=pp, x=pp.x0, t=0.0, rng=rng)
         x0 = float(ptr.x)
-        if cfg.rho0 is None:
-            rho = float(defect_density(x0, f, kappa, s, params=dp))
-        else:
-            rho = float(cfg.rho0)
         H = float(hp.H0)
         lam0 = float(lambda_rate(kappa, defect_params=dp, relaxation_params=rp))
-        tau0 = float(opacity(x0, f, kappa, params=dp))
-
-        t_hist = [0.0]
-        x_hist = [x0]
-        rho_hist = [rho]
-        H_hist = [H]
-        tau_hist = [tau0]
-        lam_hist = [lam0]
 
         grid: NDArray[np.floating] | None = None
         g_mean: list[float] = []
@@ -346,6 +377,55 @@ class ConvexDefectSimulator:
             if cfg.track_grid_stats:
                 g_mean.append(float(grid.mean()))
                 g_std.append(float(grid.std()))
+
+        ms_field: MultiScaleDefectField | None = None
+        spectrum_hist: list[NDArray[np.floating]] = []
+        if cfg.multi_scale:
+            mp = MultiScaleParams(
+                n_scales=cfg.n_scales,
+                scale_coupling=cfg.scale_coupling,
+                apply_scale_in_discrete=False,
+            )
+            # multi-scale: don't re-multiply s^{-δ} each discrete step
+            rp_ms = rp.with_updates(apply_scale_in_discrete=False)
+            if grid is not None:
+                ms_field = MultiScaleDefectField.from_misalignment(
+                    x0,
+                    f=f,
+                    kappa=kappa,
+                    defect_params=dp,
+                    relaxation_params=rp_ms,
+                    multi_params=mp,
+                    grid=grid,
+                )
+            else:
+                ms_field = MultiScaleDefectField.from_misalignment(
+                    x0,
+                    f=f,
+                    kappa=kappa,
+                    defect_params=dp,
+                    relaxation_params=rp_ms,
+                    multi_params=mp,
+                )
+            rho = ms_field.mean_density()
+            tau0 = float(ms_field.opacity()) if not ms_field.is_spatial else float(
+                np.mean(ms_field.opacity())
+            )
+            if cfg.track_spectrum:
+                spectrum_hist.append(ms_field.spectrum().copy())
+        else:
+            if cfg.rho0 is None:
+                rho = float(defect_density(x0, f, kappa, s, params=dp))
+            else:
+                rho = float(cfg.rho0)
+            tau0 = float(opacity(x0, f, kappa, params=dp))
+
+        t_hist = [0.0]
+        x_hist = [x0]
+        rho_hist = [rho]
+        H_hist = [H]
+        tau_hist = [tau0]
+        lam_hist = [lam0]
 
         # --- time loop ---
         for _ in range(cfg.n_steps):
@@ -366,45 +446,62 @@ class ConvexDefectSimulator:
                     g_std.append(float(grid.std()))
 
             # 3) defect density
-            if cfg.mode == "discrete":
-                rho = float(
-                    discrete_step(
+            if ms_field is not None:
+                if cfg.mode == "discrete":
+                    ms_field.step_discrete(x, dt=dt, grid=grid)
+                else:
+                    ms_field.step_euler(x, dt=dt, grid=grid)
+                rho = ms_field.mean_density()
+                tau = (
+                    float(ms_field.opacity())
+                    if not ms_field.is_spatial
+                    else float(np.mean(ms_field.opacity()))
+                )
+                # multi-scale holonomy from evolved ρ(s)
+                rate = ms_field.holonomy_rate(x, holonomy_params=hp)
+                if cfg.track_spectrum:
+                    spectrum_hist.append(ms_field.spectrum().copy())
+            else:
+                if cfg.mode == "discrete":
+                    rho = float(
+                        discrete_step(
+                            rho,
+                            x,
+                            f,
+                            kappa,
+                            s,
+                            dt=dt,
+                            defect_params=dp,
+                            relaxation_params=rp,
+                        )
+                    )
+                else:
+                    dr = continuous_rhs(
                         rho,
                         x,
                         f,
                         kappa,
-                        s,
-                        dt=dt,
                         defect_params=dp,
                         relaxation_params=rp,
                     )
+                    rho = max(0.0, rho + dt * dr)
+                # instantaneous holonomy (v0.1 formula)
+                rate = float(
+                    holonomy_integrand(
+                        x,
+                        f,
+                        kappa,
+                        s,
+                        defect_params=dp,
+                        holonomy_params=hp,
+                    )
                 )
-            else:
-                dr = continuous_rhs(
-                    rho,
-                    x,
-                    f,
-                    kappa,
-                    defect_params=dp,
-                    relaxation_params=rp,
-                )
-                rho = max(0.0, rho + dt * dr)
+                tau = float(opacity(x, f, kappa, params=dp))
 
             # 4) holonomy (pure accumulation)
-            rate = float(
-                holonomy_integrand(
-                    x,
-                    f,
-                    kappa,
-                    s,
-                    defect_params=dp,
-                    holonomy_params=hp,
-                )
-            )
             H = H + rate * dt
 
-            # 5) opacity snapshot from current pointer
-            tau = float(opacity(x, f, kappa, params=dp))
+            # 5) lambda snapshot
             lam = float(lambda_rate(kappa, defect_params=dp, relaxation_params=rp))
 
             t_hist.append(ptr.t)
@@ -413,6 +510,18 @@ class ConvexDefectSimulator:
             H_hist.append(H)
             tau_hist.append(tau)
             lam_hist.append(lam)
+
+        screen_final = None
+        s_bins = None
+        rho_spectrum = None
+        rho_spectrum_final = None
+        if ms_field is not None:
+            s_bins = ms_field.bins.s.copy()
+            if spectrum_hist:
+                rho_spectrum = np.stack(spectrum_hist, axis=0)
+                rho_spectrum_final = spectrum_hist[-1].copy()
+            if ms_field.is_spatial:
+                screen_final = ms_field.phase_screen()
 
         return SimResult(
             t=np.asarray(t_hist, dtype=float),
@@ -428,11 +537,19 @@ class ConvexDefectSimulator:
             grid_mean=np.asarray(g_mean, dtype=float) if g_mean else None,
             grid_std=np.asarray(g_std, dtype=float) if g_std else None,
             grid_final=None if grid is None else np.asarray(grid, dtype=float),
+            s_bins=s_bins,
+            rho_spectrum=rho_spectrum,
+            rho_spectrum_final=rho_spectrum_final,
+            screen_final=screen_final,
             metadata={
                 "mode": cfg.mode,
                 "lambda0": float(lam0),
                 "seed": cfg.seed,
                 "grid_shape": cfg.grid_shape,
+                "multi_scale": cfg.multi_scale,
+                "n_scales": cfg.n_scales if cfg.multi_scale else None,
+                "scale_coupling": cfg.scale_coupling if cfg.multi_scale else None,
+                "holonomy_source": "evolved_multi_scale" if cfg.multi_scale else "instantaneous",
             },
         )
 
@@ -448,6 +565,9 @@ def run_simulation(
     seed: int | None = 0,
     mode: Literal["discrete", "euler"] = "discrete",
     grid_shape: tuple[int, ...] | None = None,
+    multi_scale: bool = False,
+    n_scales: int = 16,
+    scale_coupling: float = 0.0,
     defect_params: DefectParams | None = None,
     pointer_params: PointerParams | None = None,
     relaxation_params: RelaxationParams | None = None,
@@ -470,6 +590,9 @@ def run_simulation(
         seed=seed,
         mode=mode,
         grid_shape=grid_shape,
+        multi_scale=multi_scale,
+        n_scales=n_scales,
+        scale_coupling=scale_coupling,
         **config_overrides,
     )
     sim = ConvexDefectSimulator(

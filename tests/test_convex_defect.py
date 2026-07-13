@@ -288,3 +288,115 @@ def test_fractal_exponent_formula():
     p = DefectParams(delta0=0.2, nu=0.3)
     d = float(fractal_exponent(KAPPA_STAR_DEFAULT + 0.1, params=p))
     assert d == pytest.approx(0.2 + 0.3 * 0.1)
+
+
+# ---------------------------------------------------------------------------
+# Multi-scale ρ(s) field
+# ---------------------------------------------------------------------------
+
+
+def test_scale_bins_logspace():
+    from convex_defect import ScaleBins
+
+    b = ScaleBins.logspace(1e-3, 1.0, 12)
+    assert b.n_scales == 12
+    assert b.s[0] < b.s[-1]
+    assert np.all(b.weights > 0)
+
+
+def test_multi_scale_spectral_heal():
+    from convex_defect import MultiScaleDefectField, MultiScaleParams
+
+    field = MultiScaleDefectField.from_misalignment(
+        0.5,
+        f=1.0,
+        kappa=KAPPA_STAR_DEFAULT,
+        multi_params=MultiScaleParams(n_scales=10, apply_scale_in_discrete=False),
+    )
+    tau0 = field.mean_density()
+    for _ in range(30):
+        field.step_discrete(0.0, dt=0.1)
+    assert field.mean_density() < tau0
+    assert field.spectrum().shape == (10,)
+    assert np.all(field.rho >= 0)
+
+
+def test_multi_scale_spatial_screen():
+    from convex_defect import MultiScaleDefectField, MultiScaleParams, multi_scale_phase_screen
+
+    rng = np.random.default_rng(0)
+    grid = 0.3 + 0.05 * rng.normal(size=(16, 16))
+    field = MultiScaleDefectField.from_misalignment(
+        0.3,
+        f=1.2,
+        kappa=KAPPA_STAR_DEFAULT,
+        multi_params=MultiScaleParams(n_scales=8),
+        grid=grid,
+    )
+    assert field.rho.shape == (16, 16, 8)
+    screen = field.phase_screen()
+    assert screen.shape == (16, 16)
+    screen2 = multi_scale_phase_screen(grid, 1.2, KAPPA_STAR_DEFAULT, multi_params=MultiScaleParams(n_scales=8))
+    assert screen2.shape == (16, 16)
+
+
+def test_multi_scale_scale_coupling():
+    from convex_defect import MultiScaleDefectField, MultiScaleParams
+
+    a = MultiScaleDefectField.from_misalignment(
+        0.4, multi_params=MultiScaleParams(n_scales=8, scale_coupling=0.0)
+    )
+    b = MultiScaleDefectField.from_misalignment(
+        0.4, multi_params=MultiScaleParams(n_scales=8, scale_coupling=0.2)
+    )
+    # spike one bin then couple
+    b.rho[0] *= 5.0
+    a.rho[0] *= 5.0
+    b.step_discrete(0.0, dt=0.05)
+    a.step_discrete(0.0, dt=0.05)
+    # coupling should smooth the spike relative to no coupling
+    assert b.rho[0] < a.rho[0] or b.rho[1] > a.rho[1]
+
+
+def test_simulator_multi_scale():
+    r = run_simulation(
+        n_steps=40,
+        dt=0.05,
+        x0=0.45,
+        seed=0,
+        multi_scale=True,
+        n_scales=10,
+        s=1.0,
+    )
+    assert r.metadata["multi_scale"] is True
+    assert r.metadata["holonomy_source"] == "evolved_multi_scale"
+    assert r.s_bins is not None and r.s_bins.shape == (10,)
+    assert r.rho_spectrum is not None
+    assert r.rho_spectrum.shape[0] == 41
+    assert r.rho_spectrum.shape[1] == 10
+    assert r.H[-1] >= r.H[0]
+    assert r.rho[-1] < r.rho[0]
+
+
+def test_simulator_multi_scale_with_grid():
+    r = run_simulation(
+        n_steps=15,
+        grid_shape=(12, 12),
+        multi_scale=True,
+        n_scales=6,
+        seed=1,
+        x0=0.35,
+    )
+    assert r.screen_final is not None
+    assert r.screen_final.shape == (12, 12)
+    assert r.grid_final is not None
+
+
+def test_grid_to_phase_screen_multi_scale():
+    from convex_defect import grid_to_phase_screen
+
+    g = np.ones((8, 8)) * 0.25
+    s1 = grid_to_phase_screen(g, 1.0, KAPPA_STAR_DEFAULT, s=1.0, multi_scale=False)
+    s2 = grid_to_phase_screen(g, 1.0, KAPPA_STAR_DEFAULT, multi_scale=True, n_scales=8)
+    assert s1.shape == s2.shape == (8, 8)
+    assert float(s2.mean()) > 0

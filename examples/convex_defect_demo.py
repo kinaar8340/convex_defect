@@ -235,6 +235,57 @@ def plot_phase_screen_before_after() -> None:
     _save(fig, "phase_screen_before_after.png")
 
 
+def plot_multi_scale_spectrum() -> None:
+    """ρ(s) spectrum evolution + multi-scale spatial screen."""
+    r = run_simulation(
+        n_steps=80,
+        dt=0.05,
+        f=1.0,
+        kappa=KAPPA_STAR_DEFAULT,
+        x0=0.5,
+        seed=0,
+        multi_scale=True,
+        n_scales=16,
+        grid_shape=(32, 32),
+        grid_noise=0.06,
+    )
+    assert r.rho_spectrum is not None and r.s_bins is not None
+
+    fig, axes = plt.subplots(1, 3, figsize=(11.5, 3.6), constrained_layout=True)
+
+    # spectrum heatmap over time
+    im = axes[0].imshow(
+        r.rho_spectrum.T,
+        origin="lower",
+        aspect="auto",
+        extent=[r.t[0], r.t[-1], np.log10(r.s_bins[0]), np.log10(r.s_bins[-1])],
+        cmap="magma",
+    )
+    axes[0].set_xlabel("t")
+    axes[0].set_ylabel(r"$\log_{10} s$")
+    axes[0].set_title(r"$\rho(s)$ spectrum (mean over space)")
+    fig.colorbar(im, ax=axes[0], fraction=0.046)
+
+    # initial vs final spectrum
+    axes[1].loglog(r.s_bins, r.rho_spectrum[0], label="t=0")
+    axes[1].loglog(r.s_bins, r.rho_spectrum[-1], label="t final")
+    axes[1].set_xlabel("s")
+    axes[1].set_ylabel(r"$\langle\rho\rangle$")
+    axes[1].set_title("Spectrum heal across scales")
+    axes[1].legend(frameon=False)
+    axes[1].grid(True, alpha=0.3, which="both")
+
+    if r.screen_final is not None:
+        im2 = axes[2].imshow(r.screen_final, origin="lower", cmap="magma")
+        axes[2].set_title(r"Integrated screen $\sum\rho_k w_k$")
+        axes[2].set_xticks([])
+        axes[2].set_yticks([])
+        fig.colorbar(im2, ax=axes[2], fraction=0.046)
+
+    fig.suptitle("Multi-scale dynamical ρ(s) field")
+    _save(fig, "multi_scale_spectrum.png")
+
+
 def plot_summary_dashboard() -> None:
     """Compact 2×2 dashboard for the default resonant run."""
     r = run_simulation(
@@ -282,6 +333,7 @@ def main() -> None:
     plot_holonomy_vs_kappa()
     plot_holonomy_vs_frequency()
     plot_phase_screen_before_after()
+    plot_multi_scale_spectrum()
     plot_summary_dashboard()
 
     # quick numeric report
