@@ -160,12 +160,20 @@ class MultiScaleParams:
     apply_scale_in_discrete: bool = False
     # continuous source injects into each bin weighted by s^{-δ}
     source_mode: Literal["uniform", "fractal"] = "fractal"
+    # Break spatial×spectral separability: per-scale spatial texture.
+    # Without this, ρ_ij,k = A(x_ij)·S_k so ∫ρ ds ∝ A(x) and RMS-normalized
+    # phase screens are independent of n_scales / scale_coupling.
+    scale_texture_amp: float = 0.4
+    # re-apply fresh scale textures each discrete/euler step (channel dynamics)
+    texture_each_step: bool = True
 
     def __post_init__(self) -> None:
         if self.n_scales < 2:
             raise ValueError("n_scales must be >= 2")
         if not (0.0 <= self.scale_coupling < 1.0):
             raise ValueError("scale_coupling must lie in [0, 1)")
+        if self.scale_texture_amp < 0:
+            raise ValueError("scale_texture_amp should be non-negative")
 
     def with_updates(self, **kwargs: Any) -> MultiScaleParams:
         return replace(self, **kwargs)
@@ -196,6 +204,7 @@ class MultiScaleDefectField:
     f: float = 1.0
     kappa: float = KAPPA_STAR_DEFAULT
     t: float = 0.0
+    _rng: np.random.Generator | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         self.rho = np.asarray(self.rho, dtype=float)
@@ -209,6 +218,11 @@ class MultiScaleDefectField:
             self.relaxation_params = self.relaxation_params.with_updates(
                 apply_scale_in_discrete=self.multi_params.apply_scale_in_discrete
             )
+
+    def set_rng(self, rng: np.random.Generator | None) -> MultiScaleDefectField:
+        """Attach RNG for scale-dependent spatial textures."""
+        self._rng = rng
+        return self
 
     # --- constructors -------------------------------------------------------
 
@@ -225,6 +239,8 @@ class MultiScaleDefectField:
         multi_params: MultiScaleParams | None = None,
         spatial_shape: tuple[int, ...] | None = None,
         grid: ArrayLike | None = None,
+        rng: np.random.Generator | None = None,
+        inject_texture: bool = True,
     ) -> MultiScaleDefectField:
         """Seed ρ from the static density formula at each scale bin.
 
@@ -237,6 +253,10 @@ class MultiScaleDefectField:
         spatial_shape :
             If set (and grid is None), seed a uniform field of that shape
             using scalar ``x``.
+        rng :
+            Optional generator for scale-dependent spatial textures.
+        inject_texture :
+            If True (default) and spatial, break A(x)·S(s) separability.
         """
         dp = defect_params or DefectParams()
         mp = multi_params or MultiScaleParams()
@@ -266,7 +286,7 @@ class MultiScaleDefectField:
                 dtype=float,
             )
 
-        return cls(
+        field = cls(
             bins=b,
             rho=rho,
             defect_params=dp,
@@ -275,7 +295,11 @@ class MultiScaleDefectField:
             f=float(f),
             kappa=k,
             t=0.0,
+            _rng=rng,
         )
+        if inject_texture and field.is_spatial and mp.scale_texture_amp > 0:
+            field.inject_scale_textures(rng=rng)
+        return field
 
     # --- properties ---------------------------------------------------------
 
@@ -376,12 +400,92 @@ class MultiScaleDefectField:
         neighbor = 0.5 * (left + right)
         self.rho = (1.0 - c) * r + c * neighbor
 
+    def inject_scale_textures(
+        self,
+        rng: np.random.Generator | None = None,
+        *,
+        amplitude: float | None = None,
+        multiplicative: bool = True,
+    ) -> None:
+        """Add per-scale spatial structure (breaks A(x)·S(s) separability).
+
+        Smaller ``s`` → shorter spatial correlation length (finer texture),
+        matching high-frequency / fine-scale fractal coupling.
+        """
+        if not self.is_spatial:
+            return
+        amp = self.multi_params.scale_texture_amp if amplitude is None else float(amplitude)
+        if amp <= 0.0:
+            return
+        rng = rng or self._rng or np.random.default_rng()
+        shape = self.spatial_shape
+        if len(shape) == 1:
+            n = shape[0]
+            s_min = float(self.bins.s.min())
+            s_max = float(self.bins.s.max())
+            for k, s in enumerate(self.bins.s):
+                # correlation length in samples
+                frac = (np.log(float(s) + 1e-30) - np.log(s_min + 1e-30)) / (
+                    np.log(s_max + 1e-30) - np.log(s_min + 1e-30) + 1e-30
+                )
+                corr = max(1.0, 1.0 + frac * (0.25 * n))
+                noise = rng.normal(size=n)
+                # box smooth
+                w = max(1, int(round(corr)))
+                kernel = np.ones(w) / w
+                smooth = np.convolve(noise, kernel, mode="same")
+                smooth = smooth / (smooth.std() + 1e-12)
+                if multiplicative:
+                    self.rho[..., k] = np.maximum(
+                        0.0, self.rho[..., k] * (1.0 + amp * smooth)
+                    )
+                else:
+                    self.rho[..., k] = np.maximum(
+                        0.0, self.rho[..., k] + amp * float(np.mean(self.rho[..., k])) * smooth
+                    )
+            return
+
+        # 2D (or higher: use first two axes)
+        h, w = int(shape[0]), int(shape[1])
+        s_min = float(self.bins.s.min())
+        s_max = float(self.bins.s.max())
+        for k, s in enumerate(self.bins.s):
+            frac = (np.log(float(s) + 1e-30) - np.log(s_min + 1e-30)) / (
+                np.log(s_max + 1e-30) - np.log(s_min + 1e-30) + 1e-30
+            )
+            # small s → fine (low frac if s near s_min)
+            corr = max(1.0, 1.0 + frac * (0.3 * min(h, w)))
+            noise = rng.normal(size=(h, w))
+            # FFT low-pass with cutoff ~ 1/corr
+            F = np.fft.fft2(noise)
+            fy = np.fft.fftfreq(h)
+            fx = np.fft.fftfreq(w)
+            ky, kx = np.meshgrid(fy, fx, indexing="ij")
+            k2 = kx**2 + ky**2
+            sigma_k = 1.0 / (2.0 * np.pi * corr / max(h, w) + 1e-12)
+            # actually: larger corr → narrower k → use gaussian exp(-k2 / (2 sigma^2))
+            sig = 0.35 / (corr / max(h, w) + 1e-12)
+            filt = np.exp(-k2 * (sig**2))
+            smooth = np.fft.ifft2(F * filt).real
+            smooth = smooth - smooth.mean()
+            smooth = smooth / (smooth.std() + 1e-12)
+            if multiplicative:
+                self.rho[..., k] = np.maximum(
+                    0.0, self.rho[..., k] * (1.0 + amp * smooth)
+                )
+            else:
+                base = float(np.mean(self.rho[..., k])) + 1e-12
+                self.rho[..., k] = np.maximum(
+                    0.0, self.rho[..., k] + amp * base * smooth
+                )
+
     def step_discrete(
         self,
         x: ArrayLike,
         dt: float = 1.0,
         *,
         grid: ArrayLike | None = None,
+        rng: np.random.Generator | None = None,
     ) -> NDArray[np.floating]:
         """One discrete survival step for every scale bin.
 
@@ -430,6 +534,12 @@ class MultiScaleDefectField:
                 )
 
         self._apply_scale_coupling()
+        if (
+            self.is_spatial
+            and self.multi_params.texture_each_step
+            and self.multi_params.scale_texture_amp > 0
+        ):
+            self.inject_scale_textures(rng=rng or self._rng)
         self.t += dt
         return self.rho
 

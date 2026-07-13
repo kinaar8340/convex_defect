@@ -400,3 +400,28 @@ def test_grid_to_phase_screen_multi_scale():
     s2 = grid_to_phase_screen(g, 1.0, KAPPA_STAR_DEFAULT, multi_scale=True, n_scales=8)
     assert s1.shape == s2.shape == (8, 8)
     assert float(s2.mean()) > 0
+
+
+def test_scale_textures_break_separability():
+    """Without texture, n_scales cannot change RMS-normalized screens."""
+    from convex_defect import MultiScaleDefectField, MultiScaleParams
+
+    rng = np.random.default_rng(1)
+    grid = 0.3 + 0.04 * rng.normal(size=(24, 24))
+
+    def norm_screen(ns: int, amp: float) -> np.ndarray:
+        mp = MultiScaleParams(n_scales=ns, scale_texture_amp=amp, texture_each_step=False)
+        f = MultiScaleDefectField.from_misalignment(
+            0.3, multi_params=mp, grid=grid, rng=rng, inject_texture=amp > 0
+        )
+        s = f.phase_screen()
+        s = s - s.mean()
+        return s / (s.std() + 1e-12)
+
+    a = norm_screen(4, 0.0)
+    b = norm_screen(16, 0.0)
+    assert abs(float(np.corrcoef(a.ravel(), b.ravel())[0, 1]) - 1.0) < 1e-6
+
+    c = norm_screen(4, 0.4)
+    d = norm_screen(16, 0.4)
+    assert float(np.corrcoef(c.ravel(), d.ravel())[0, 1]) < 0.95
