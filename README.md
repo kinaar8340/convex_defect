@@ -67,3 +67,7 @@ pytest
 - **Trajectoid geodesics** — rolling paths on a fractally textured manifold
 
 See `docs/convex_defect_theory.md` for the full equation set.
+
+---
+
+X: [@kinaar8340](https://x.com/kinaar8340)
