@@ -57,6 +57,8 @@ pytest
 | `src/convex_defect/cli.py` | Thin CLI |
 | `src/convex_defect/gradio_app.py` | Optional interactive UI |
 | `examples/convex_defect_demo.py` | Plots: Gaussian vs \(f\), relaxation, \(H(t)\), phase screens |
+| `examples/plot_qho_successor_diagram.py` | QHO-successor poster (frequency ladder + \(\kappa\) relaxation) |
+| `docs/topological_convex_defect_qho_successor.png` | Rendered theory poster |
 | `tests/test_convex_defect.py` | Unit tests |
 
 ## Conceptual links
@@ -65,8 +67,31 @@ pytest
 - **Survival eigenstructure** — `pde_survival_eigenstructure` relaxation rates
 - **OAM flux / turbulence** — `oam_flux` + `flux_trajectoid` propagation screens (`grid_to_phase_screen`)
 - **Trajectoid geodesics** — rolling paths on a fractally textured manifold
+- **Flux / Hopf primitives** — `flux_hopf_lib` (`gaussian_defect`, gauge \(\kappa\), survival)
 
 See `docs/convex_defect_theory.md` for the full equation set.
+
+## From QHO to topological defect density
+
+The classical 1D quantum harmonic oscillator (QHO) poster — parabolic well, Hermite eigenstates \(n=0,1,2,\ldots\), densities \(|\psi_n(x)|^2\) — is **not** what this package implements. The only structural kinship is the **Gaussian core**: QHO ground state \(\psi_0\), `flux_hopf_lib.gaussian_defect`, and the Gaussian factor in
+
+\[
+\rho(x,f,\kappa,s)
+  = A(f,\kappa)\,
+    \exp\!\left(-\frac{x^2}{\sigma(f,\kappa)^2}\right)\,
+    s^{-\delta(\kappa)}.
+\]
+
+Frequency \(f\), gauge detuning from \(\kappa^*\approx 0.8513\), multi-scale fractal weight \(s^{-\delta(\kappa)}\), and survival-eigenstructure healing \(\lambda(\kappa)\) are the new physics; they live here (and on top of `flux_hopf_lib` gauge/survival primitives), not in textbook QHO.
+
+![Topological convex defect density](docs/topological_convex_defect_qho_successor.png)
+
+**Figure.** Frequency-dependent cores with multi-scale fractal relaxation in a gauged Hopf/flux medium. Solid: resonant \(\kappa=\kappa^*\); dashed: detuned; faint: multi-scale \(s\). Insets: \(\lambda(\kappa)\) (healing maximized at the resonant attractor), relaxation trajectories, quicksand narrowing of \(\sigma(f)\), and fractal exponent \(\delta(\kappa)\). Full caption and mapping table: [`docs/convex_defect_theory.md`](docs/convex_defect_theory.md#relation-to-the-classical-quantum-harmonic-oscillator).
+
+```bash
+# regenerate poster
+PYTHONPATH=src python examples/plot_qho_successor_diagram.py
+```
 
 ---
 

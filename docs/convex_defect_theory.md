@@ -16,6 +16,54 @@ The model unifies:
 
 This framework maps naturally onto turbulence in `flux_trajectoid` (Kolmogorov screens, OAM fidelity degradation) and the holonomy/PDE dynamics in `mystery`.
 
+## Relation to the classical quantum harmonic oscillator
+
+A common pedagogical poster for the 1D quantum harmonic oscillator (QHO) shows a parabolic well, energy eigenstates labeled by \(n = 0,1,2,\ldots\), and probability densities \(|\psi_n(x)|^2\) built from Hermite polynomials. That picture is **not** what this package implements.
+
+The only deep structural overlap is the **Gaussian core**:
+
+- QHO ground state: \(\psi_0(x) \propto \exp(-m\omega x^2 / 2\hbar)\).
+- `flux_hopf_lib.flux.gaussian_defect`: isotropic 2D Gaussian on a flux lattice.
+- This package: the same Gaussian shape appears as the core of
+
+\[
+\rho(x, f, \kappa, s)
+  = A(f, \kappa)\,
+    \exp\!\left(-\frac{x^2}{\sigma(f, \kappa)^2}\right)\,
+    s^{-\delta(\kappa)}.
+\]
+
+Everything else is a different theory:
+
+| Classical QHO | `convex_defect` (+ `flux_hopf_lib`) |
+|---------------|-------------------------------------|
+| Stationary eigenfunctions \(\psi_n\) | Defect density field \(\rho\) (not a wavefunction) |
+| Quantum number \(n\) | Frequency ladder \(f\) (visual / physical “levels”) |
+| Hermite nodes \(H_n\) | Multi-scale fractal weight \(s^{-\delta(\kappa)}\) |
+| Oscillator frequency \(\omega\) | \(f\) in \(\sigma\), \(A\), and misalignment source \(\eta\) |
+| Schrödinger Hamiltonian | Survival ODE / discrete healing with \(\lambda(\kappa)\) |
+| \(\hbar, m\) | Gauge \(\kappa^*\approx 0.8513\), residual \(R\), fractal \(\delta_0,\nu\) |
+| Confinement \(V\propto x^2\) | Pointer-misalignment source \(\eta\,x^2\) (and clamp factor) |
+
+In short: the SciVision-style QHO poster is a **pedagogical ancestor** for the Gaussian ground state; the scientifically accurate successor for this research line is frequency-dependent topological convex defect density with \(\kappa\)-tuned fractal relaxation.
+
+![Topological convex defect density — frequency ladder, κ-tuned relaxation, and survival formulas](topological_convex_defect_qho_successor.png)
+
+**Figure.** Topological convex defect density with frequency-dependent cores and \(\kappa\)-tuned fractal relaxation in a gauged Hopf/flux medium.
+The classical QHO ground-state Gaussian (and `flux_hopf_lib.gaussian_defect`) is generalized to
+\(\rho(x,f,\kappa,s)=A(f,\kappa)\,\exp(-x^2/\sigma(f,\kappa)^2)\,s^{-\delta(\kappa)}\),
+where core width \(\sigma\) narrows with frequency (“quicksand”), while amplitude and fractal exponent grow with detuning from the holonomy-gap null \(\kappa^*\approx 0.8513\).
+Solid curves: resonant \(\kappa=\kappa^*\); dashed: detuned; faint traces: multi-scale \(s^{-\delta}\).
+The confining parabola is re-interpreted as the pointer-misalignment source term \(\eta x^2\) in the survival ODE.
+Insets show healing rate \(\lambda(\kappa)\), relaxation trajectories, core narrowing, and fractal exponent.
+Based on `convex_defect` (`defect_density.py`, `relaxation_dynamics.py`) building on `flux_hopf_lib` Gaussian/gauge primitives.
+
+Regenerate the figure with:
+
+```bash
+PYTHONPATH=src python examples/plot_qho_successor_diagram.py
+```
+
 ## Variables
 
 | Symbol | Meaning |
@@ -277,11 +325,13 @@ In `flux_trajectoid`: `propagate(..., screen_model="convex_defect", multi_scale=
 ## Next steps
 
 1. ✅ Theory doc + `defect_density.py`
-2. `relaxation_dynamics.py` + `holonomy_accumulator.py`
-3. Minimal simulator coupling pointer dynamics to \(\rho\)
-4. Frequency-sweep and fractal-holonomy visualizations
-5. Conceptual hook into `flux_trajectoid` turbulence (structured screens from \(\rho\))
-6. Optional: live coupling to `oam_flux` lattice twist fields
+2. ✅ `relaxation_dynamics.py` + `holonomy_accumulator.py`
+3. ✅ Minimal simulator coupling pointer dynamics to \(\rho\)
+4. ✅ Frequency-sweep and fractal-holonomy visualizations
+5. ✅ Conceptual hook into `flux_trajectoid` turbulence (structured screens from \(\rho\))
+6. ✅ QHO-successor diagram + “Relation to classical QHO” section (this document / README)
+7. Optional: live coupling to `oam_flux` lattice twist fields
+8. Optional: single-panel poster-only layout for slides
 
 ## References & related notes
 
